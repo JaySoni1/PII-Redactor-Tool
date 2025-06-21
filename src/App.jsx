@@ -82,10 +82,21 @@ function App() {
         return labelStyle === 'numbered' ? `[PHONE_${phoneCount++}]` : '[REDACTED PHONE]'
       })
     }
-    // Name (very basic, capitalized words, not perfect)
+    // Name (improved to catch single, double, and triple capitalized names)
     if (options.name) {
+      // First, redact three-word names (e.g., Soni Jay Gaurang)
+      redacted = redacted.replace(/\b([A-Z][a-z]+\s[A-Z][a-z]+\s[A-Z][a-z]+)\b/g, (match) => {
+        items.push({ type: 'Name', value: match, reason: 'Matched regex for three-word name' })
+        return labelStyle === 'numbered' ? `[NAME_${nameCount++}]` : '[REDACTED NAME]'
+      })
+      // Then, redact two-word names (e.g., Soni Jay)
       redacted = redacted.replace(/\b([A-Z][a-z]+\s[A-Z][a-z]+)\b/g, (match) => {
-        items.push({ type: 'Name', value: match, reason: 'Matched regex for name' })
+        items.push({ type: 'Name', value: match, reason: 'Matched regex for two-word name' })
+        return labelStyle === 'numbered' ? `[NAME_${nameCount++}]` : '[REDACTED NAME]'
+      })
+      // Finally, redact single capitalized words (e.g., Gaurang)
+      redacted = redacted.replace(/\b([A-Z][a-z]{2,})\b/g, (match) => {
+        items.push({ type: 'Name', value: match, reason: 'Matched regex for single-word name' })
         return labelStyle === 'numbered' ? `[NAME_${nameCount++}]` : '[REDACTED NAME]'
       })
     }
@@ -163,8 +174,40 @@ function App() {
 
   // Generate a PDF file from redacted text using pdf-lib
   const generatePdfFromText = async (text, fileName) => {
-    // Replace unsupported characters (e.g., ◦) with a dash
-    text = text.replace(/[\u25E6]/g, '-')
+    // Clean text of unsupported Unicode characters that cause WinAnsi encoding errors
+    const cleanText = text
+      // Replace common problematic Unicode characters with ASCII equivalents
+      .replace(/[\u25E6]/g, '-') // ◦ (bullet) -> dash
+      .replace(/[\u2013\u2014]/g, '-') // en-dash, em-dash -> dash
+      .replace(/[\u2018\u2019]/g, "'") // smart quotes -> simple quote
+      .replace(/[\u201C\u201D]/g, '"') // smart quotes -> simple quote
+      .replace(/[\u2022]/g, '-') // bullet -> dash
+      .replace(/[\u2026]/g, '...') // ellipsis -> three dots
+      .replace(/[\u00A0]/g, ' ') // non-breaking space -> regular space
+      // Remove or replace other potentially problematic Unicode characters
+      .replace(/[\u0080-\u009F]/g, '') // Control characters
+      .replace(/[\u00AD]/g, '') // Soft hyphen
+      .replace(/[\u200B-\u200D\uFEFF]/g, '') // Zero-width characters
+      // Replace any remaining non-ASCII characters that might cause issues
+      .replace(/[^\x00-\x7F]/g, (char) => {
+        // Map common Unicode characters to ASCII equivalents
+        const charMap = {
+          'à': 'a', 'á': 'a', 'â': 'a', 'ã': 'a', 'ä': 'a', 'å': 'a',
+          'è': 'e', 'é': 'e', 'ê': 'e', 'ë': 'e',
+          'ì': 'i', 'í': 'i', 'î': 'i', 'ï': 'i',
+          'ò': 'o', 'ó': 'o', 'ô': 'o', 'õ': 'o', 'ö': 'o',
+          'ù': 'u', 'ú': 'u', 'û': 'u', 'ü': 'u',
+          'ñ': 'n', 'ç': 'c',
+          'À': 'A', 'Á': 'A', 'Â': 'A', 'Ã': 'A', 'Ä': 'A', 'Å': 'A',
+          'È': 'E', 'É': 'E', 'Ê': 'E', 'Ë': 'E',
+          'Ì': 'I', 'Í': 'I', 'Î': 'I', 'Ï': 'I',
+          'Ò': 'O', 'Ó': 'O', 'Ô': 'O', 'Õ': 'O', 'Ö': 'O',
+          'Ù': 'U', 'Ú': 'U', 'Û': 'U', 'Ü': 'U',
+          'Ñ': 'N', 'Ç': 'C'
+        };
+        return charMap[char] || '?';
+      });
+
     const pdfDoc = await PDFDocument.create()
     const page = pdfDoc.addPage()
     const { width, height } = page.getSize()
@@ -174,7 +217,7 @@ function App() {
     const maxWidth = width - 80
     const lines = []
     let currentLine = ''
-    text.split(/\r?\n/).forEach(paragraph => {
+    cleanText.split(/\r?\n/).forEach(paragraph => {
       paragraph.split(' ').forEach(word => {
         const testLine = currentLine ? currentLine + ' ' + word : word
         const testWidth = font.widthOfTextAtSize(testLine, fontSize)
