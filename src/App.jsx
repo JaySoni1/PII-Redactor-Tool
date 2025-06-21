@@ -24,12 +24,10 @@ function App() {
     setPdfProgress(0)
     const arrayBuffer = await file.arrayBuffer()
     const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
-    console.log('PDF loaded. Number of pages:', pdf.numPages)
     let text = ''
     for (let i = 1; i <= pdf.numPages; i++) {
       const page = await pdf.getPage(i)
       const content = await page.getTextContent()
-      console.log(`Page ${i} content:`, content.items.map(item => item.str).join(' '))
       text += content.items.map(item => item.str).join(' ') + '\n'
       setPdfProgress(Math.round((i / pdf.numPages) * 100))
     }
@@ -42,24 +40,32 @@ function App() {
     setFile(file)
     setRedactedFileUrl(null)
     setFileText('')
+    setRedactedText('')
+    setRedactedItems([])
     setStatus('Reading file...')
-    if (!file) return
+
+    if (!file) {
+      setStatus('No file selected.')
+      return
+    }
+
     const ext = file.name.split('.').pop().toLowerCase()
     try {
+      let text = '';
       if (ext === 'txt') {
-        const text = await file.text()
-        setFileText(text)
+        text = await file.text()
         setStatus('Text file loaded.')
       } else if (ext === 'pdf') {
-        const text = await extractTextFromPDF(file)
-        setFileText(text)
+        text = await extractTextFromPDF(file)
         setStatus('PDF text extracted.')
       } else {
         setStatus('Unsupported file type. Only PDF and TXT are supported.')
+        return;
       }
+      setFileText(text)
     } catch (err) {
-      console.error('PDF/Text extraction error:', err)
-      setStatus('Error reading file.')
+      console.error('Error reading file:', err)
+      setStatus('Error reading file. See console for details.')
     }
   }
 
@@ -336,15 +342,19 @@ function App() {
       </div>
 
       {/* Show original and redacted text side by side */}
-      {fileText && (
+      {file && (
         <div style={{ display: 'flex', gap: '2rem', marginTop: '2rem', alignItems: 'flex-start' }}>
           <div style={{ flex: 1 }}>
             <h3>Original Text</h3>
-            <pre style={{ background: '#f4f4f4', padding: '1rem', borderRadius: '6px', maxHeight: 300, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{fileText}</pre>
+            <pre style={{ background: '#f4f4f4', padding: '1rem', borderRadius: '6px', maxHeight: 300, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+              {fileText || 'Processing file...'}
+            </pre>
           </div>
           <div style={{ flex: 1 }}>
             <h3>Redacted Text</h3>
-            <pre style={{ background: '#f4f4f4', padding: '1rem', borderRadius: '6px', maxHeight: 300, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{redactedText}</pre>
+            <pre style={{ background: '#f4f4f4', padding: '1rem', borderRadius: '6px', maxHeight: 300, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+              {redactedText || 'Click "Redact PII" to see redacted text.'}
+            </pre>
           </div>
         </div>
       )}

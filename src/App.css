@@ -47,7 +47,7 @@ body {
 }
 
 .app-container {
-  max-width: 480px;
+  max-width: 1200px;
   margin: 48px auto;
   padding: 2.5rem 2rem;
   background: #fff;
@@ -196,6 +196,12 @@ tr:nth-child(even) {
   table, th, td {
     font-size: 0.93rem;
     padding: 7px 4px;
+  }
+  
+  /* Make side-by-side layout stack on mobile */
+  .app-container > div[style*='display: flex'] {
+    flex-direction: column !important;
+    gap: 1rem !important;
   }
 }
 
