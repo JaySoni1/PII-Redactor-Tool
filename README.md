@@ -2,7 +2,7 @@
 
 A minimal web tool to detect and redact Personally Identifiable Information (PII) such as **email addresses, phone numbers , names, and addresses** from PDF and TXT files.
 
----
+
 
 ## Features
 
@@ -15,13 +15,19 @@ A minimal web tool to detect and redact Personally Identifiable Information (PII
 ## Implementation Overview
 The tool is built using React and designed to be simple and privacy-focused. It works in two ways: using regex for PII detection and also supports Gemini LLM for smarter results.
 
--Built with a clean React UI
--Detects emails, phone numbers, names, and addresses using regex
--Shows original and redacted text side-by-side
--Supports Gemini LLM for advanced detection
--Allows downloading redacted files as PDF
--OCR for scanned PDFs/images (coming soon)
--DOC/DOCX file support (coming soon)
+- Built with a clean React UI
+
+- Detects emails, phone numbers, names, and addresses using regex
+
+- Shows original and redacted text side-by-side
+
+- Supports Gemini LLM for advanced detection
+
+- Allows downloading redacted files as PDF
+
+- OCR for scanned PDFs/images (coming soon)
+
+- DOC/DOCX file support (coming soon)
 
 ## [Tool Workflow](https://excalidraw.com/#json=I2HaqDXQvDNa3D8beCU90,nSvE49cCl691GIUsF1SxJA)
 
