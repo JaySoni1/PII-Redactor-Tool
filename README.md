@@ -25,7 +25,8 @@ The tool is built using React and designed to be simple and privacy-focused. It 
 -DOC/DOCX file support (coming soon)
 
 ## Tool Workflow
-![image](https://github.com/user-attachments/assets/16ac210e-6351-4d73-bdb0-7df85049c842) (Link -https://excalidraw.com/#json=I2HaqDXQvDNa3D8beCU90,nSvE49cCl691GIUsF1SxJA)
+![image](https://github.com/user-attachments/assets/16ac210e-6351-4d73-bdb0-7df85049c842) 
+(Link -https://excalidraw.com/#json=I2HaqDXQvDNa3D8beCU90,nSvE49cCl691GIUsF1SxJA)
 
 ## Screenshots
 
