@@ -4,6 +4,7 @@ import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf';
 pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
 import { PDFDocument, StandardFonts } from 'pdf-lib';
 import axios from 'axios';
+import Tesseract from 'tesseract.js';
 
 function App() {
   const [file, setFile] = useState(null)
@@ -18,20 +19,59 @@ function App() {
   const [redactOptions, setRedactOptions] = useState({ email: true, phone: true, name: true, address: true })
   const [labelStyle, setLabelStyle] = useState('default')
 
-  // Helper: Extract text from PDF using pdfjs-dist
+  // Helper: Extract text from PDF using pdfjs-dist, fallback to OCR if needed
   const extractTextFromPDF = async (file) => {
     setStatus('Extracting text from PDF...')
     setPdfProgress(0)
     const arrayBuffer = await file.arrayBuffer()
     const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
     let text = ''
+    let ocrText = ''
+    let extractedPages = 0
+
     for (let i = 1; i <= pdf.numPages; i++) {
       const page = await pdf.getPage(i)
       const content = await page.getTextContent()
-      text += content.items.map(item => item.str).join(' ') + '\n'
+      const pageText = content.items.map(item => item.str).join(' ')
+      text += pageText + '\n'
+      extractedPages++
       setPdfProgress(Math.round((i / pdf.numPages) * 100))
     }
     setPdfProgress(100)
+
+    // If extracted text is too short (likely scanned PDF), fallback to OCR
+    if (text.replace(/\s/g, '').length < 30) {
+      setStatus('No selectable text found. Running OCR on scanned PDF...')
+      text = ''
+      setPdfProgress(0)
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i)
+        const viewport = page.getViewport({ scale: 2.0 })
+        // Create a canvas to render the page
+        const canvas = document.createElement('canvas')
+        const context = canvas.getContext('2d')
+        canvas.width = viewport.width
+        canvas.height = viewport.height
+        await page.render({ canvasContext: context, viewport }).promise
+        // Run OCR on the canvas image
+        setStatus(`Running OCR on page ${i} of ${pdf.numPages}...`)
+        const { data: { text: ocrResult } } = await Tesseract.recognize(
+          canvas,
+          'eng',
+          {
+            logger: m => {
+              if (m.status === 'recognizing text') {
+                setPdfProgress(Math.round((i - 1 + m.progress) / pdf.numPages * 100))
+              }
+            }
+          }
+        )
+        text += ocrResult + '\n'
+        setPdfProgress(Math.round((i / pdf.numPages) * 100))
+      }
+      setPdfProgress(100)
+      setStatus('OCR extraction complete.')
+    }
     return text
   }
 
@@ -74,6 +114,22 @@ function App() {
     let redacted = text
     const items = []
     let emailCount = 1, phoneCount = 1, nameCount = 1, addressCount = 1
+    // Add a list of common English words to avoid as names
+    const stopwords = [
+      'The', 'This', 'That', 'From', 'Other', 'And', 'But', 'With', 'For', 'Not', 'You', 'Your', 'Dear', 'Best', 'Regards', 'Subject', 'Date', 'To', 'Cc', 'Bcc', 'Hi', 'Hello', 'Thanks', 'Thank', 'Please', 'No', 'Yes', 'It', 'We', 'Us', 'He', 'She', 'They', 'His', 'Her', 'Their', 'Our', 'My', 'Me', 'I', 'In', 'On', 'At', 'By', 'Of', 'As', 'Is', 'Are', 'Be', 'Was', 'Were', 'Do', 'Did', 'Has', 'Have', 'Had', 'Will', 'Shall', 'Can', 'Could', 'Would', 'Should', 'May', 'Might', 'Must', 'If', 'Else', 'Then', 'So', 'Or', 'An', 'A'
+    ]
+    // Add a stoplist for department/team/organization words
+    const orgStopwords = [
+      'Department', 'Team', 'Division', 'Organization', 'Company', 'Office', 'Branch', 'Unit', 'Section', 'Committee', 'Board', 'Group',
+      'Account', 'Details', 'Accounts', 'Information', 'Customer', 'Service', 'Support', 'Manager', 'Admin', 'Administrator', 'Dear',
+      'Primary', 'Secondary', 'Info', 'Information',
+      // Add more business/role/label words to avoid false positives
+      'Risk', 'Management', 'Finance', 'Operations', 'Compliance', 'Legal', 'Audit', 'Procurement', 'Sales', 'Marketing', 'Human', 'Resources', 'IT', 'Technology', 'Security', 'Planning', 'Strategy', 'Quality', 'Control', 'Assurance',
+      'System', 'Access', 'User', 'Role', 'Permission', 'Credentials', 'Login', 'Logout', 'Profile', 'Account', 'Data', 'Record'
+    ];
+    // Optionally, a whitelist for common single-word names
+    const nameWhitelist = ['Smith', 'John', 'Jay', 'Michael', 'Chen', 'Wong', 'Kee', 'Jogn']; // Add more as needed
+
     // Email
     if (options.email) {
       redacted = redacted.replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, (match) => {
@@ -90,20 +146,50 @@ function App() {
     }
     // Name (improved to catch single, double, and triple capitalized names)
     if (options.name) {
-      // First, redact three-word names (e.g., Soni Jay Gaurang)
-      redacted = redacted.replace(/\b([A-Z][a-z]+\s[A-Z][a-z]+\s[A-Z][a-z]+)\b/g, (match) => {
-        items.push({ type: 'Name', value: match, reason: 'Matched regex for three-word name' })
-        return labelStyle === 'numbered' ? `[NAME_${nameCount++}]` : '[REDACTED NAME]'
+      // Redact names after common labels (e.g., "To:", "From:", "Department:")
+      redacted = redacted.replace(/(To:\s*)([A-Z][a-z]+\s+[A-Z][a-z]+)/g, (match, p1, p2) => {
+        const parts = p2.split(' ');
+        if (parts.some(w => orgStopwords.includes(w))) return match;
+        items.push({ type: 'Name', value: p2, reason: 'Matched name after To:' })
+        return p1 + (labelStyle === 'numbered' ? `[NAME_${nameCount++}]` : '[REDACTED NAME]')
       })
-      // Then, redact two-word names (e.g., Soni Jay)
-      redacted = redacted.replace(/\b([A-Z][a-z]+\s[A-Z][a-z]+)\b/g, (match) => {
-        items.push({ type: 'Name', value: match, reason: 'Matched regex for two-word name' })
-        return labelStyle === 'numbered' ? `[NAME_${nameCount++}]` : '[REDACTED NAME]'
+      redacted = redacted.replace(/(From:\s*)([A-Z][a-z]+\s+[A-Z][a-z]+)/g, (match, p1, p2) => {
+        const parts = p2.split(' ');
+        if (parts.some(w => orgStopwords.includes(w))) return match;
+        items.push({ type: 'Name', value: p2, reason: 'Matched name after From:' })
+        return p1 + (labelStyle === 'numbered' ? `[NAME_${nameCount++}]` : '[REDACTED NAME]')
       })
-      // Finally, redact single capitalized words (e.g., Gaurang)
+      redacted = redacted.replace(/(Department:\s*)([A-Z][a-z]+\s+[A-Z][a-z]+)/g, (match, p1, p2) => {
+        const parts = p2.split(' ');
+        if (parts.some(w => orgStopwords.includes(w))) return match;
+        items.push({ type: 'Name', value: p2, reason: 'Matched name after Department:' })
+        return p1 + (labelStyle === 'numbered' ? `[NAME_${nameCount++}]` : '[REDACTED NAME]')
+      })
+      // Improved: Redact three-word names, including hyphenated and apostrophe names, skip if any word is in orgStopwords or stopwords
+      redacted = redacted.replace(
+        /\b([A-Z][a-zA-Z'’-]{2,})\s+([A-Z][a-zA-Z'’-]{2,})\s+([A-Z][a-zA-Z'’-]{2,})\b/g,
+        (match, w1, w2, w3) => {
+          if ([w1, w2, w3].some(w => orgStopwords.includes(w) || stopwords.includes(w))) return match;
+          items.push({ type: 'Name', value: match, reason: 'Matched regex for three-word name (hyphen/apostrophe supported)' })
+          return labelStyle === 'numbered' ? `[NAME_${nameCount++}]` : '[REDACTED NAME]'
+        }
+      )
+      // Improved: Redact two-word names, including hyphenated and apostrophe names, skip if any word is in orgStopwords or stopwords
+      redacted = redacted.replace(
+        /\b([A-Z][a-zA-Z'’-]{2,})\s+([A-Z][a-zA-Z'’-]{2,})\b/g,
+        (match, w1, w2) => {
+          if ([w1, w2].some(w => orgStopwords.includes(w) || stopwords.includes(w))) return match;
+          items.push({ type: 'Name', value: match, reason: 'Matched regex for two-word name (hyphen/apostrophe supported)' })
+          return labelStyle === 'numbered' ? `[NAME_${nameCount++}]` : '[REDACTED NAME]'
+        }
+      )
+      // Optional: Redact single-word names if in whitelist
       redacted = redacted.replace(/\b([A-Z][a-z]{2,})\b/g, (match) => {
-        items.push({ type: 'Name', value: match, reason: 'Matched regex for single-word name' })
-        return labelStyle === 'numbered' ? `[NAME_${nameCount++}]` : '[REDACTED NAME]'
+        if (nameWhitelist.includes(match)) {
+          items.push({ type: 'Name', value: match, reason: 'Matched whitelist single-word name' })
+          return labelStyle === 'numbered' ? `[NAME_${nameCount++}]` : '[REDACTED NAME]'
+        }
+        return match;
       })
     }
     // Address (very basic, numbers followed by street, not perfect)
@@ -215,11 +301,10 @@ function App() {
       });
 
     const pdfDoc = await PDFDocument.create()
-    const page = pdfDoc.addPage()
-    const { width, height } = page.getSize()
+    let page = pdfDoc.addPage()
+    let { width, height } = page.getSize()
     const font = await pdfDoc.embedFont(StandardFonts.Helvetica)
     const fontSize = 12
-    // Split text into lines that fit the page width
     const maxWidth = width - 80
     const lines = []
     let currentLine = ''
@@ -243,8 +328,9 @@ function App() {
     let y = height - 40
     for (const line of lines) {
       if (y < 40) {
-        page.drawText('...continued', { x: 40, y, size: fontSize, font })
-        break
+        // Add new page and reset y
+        page = pdfDoc.addPage()
+        y = height - 40
       }
       page.drawText(line, { x: 40, y, size: fontSize, font })
       y -= fontSize + 4
