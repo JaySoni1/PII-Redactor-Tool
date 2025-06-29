@@ -116,7 +116,16 @@ function App() {
     let emailCount = 1, phoneCount = 1, nameCount = 1, addressCount = 1
     // Add a list of common English words to avoid as names
     const stopwords = [
-      'The', 'This', 'That', 'From', 'Other', 'And', 'But', 'With', 'For', 'Not', 'You', 'Your', 'Dear', 'Best', 'Regards', 'Subject', 'Date', 'To', 'Cc', 'Bcc', 'Hi', 'Hello', 'Thanks', 'Thank', 'Please', 'No', 'Yes', 'It', 'We', 'Us', 'He', 'She', 'They', 'His', 'Her', 'Their', 'Our', 'My', 'Me', 'I', 'In', 'On', 'At', 'By', 'Of', 'As', 'Is', 'Are', 'Be', 'Was', 'Were', 'Do', 'Did', 'Has', 'Have', 'Had', 'Will', 'Shall', 'Can', 'Could', 'Would', 'Should', 'May', 'Might', 'Must', 'If', 'Else', 'Then', 'So', 'Or', 'An', 'A'
+      'The', 'This', 'That', 'From', 'Other', 'And', 'But', 'With', 'For', 'Not', 'You', 'Your', 'Dear', 'Best', 'Regards', 'Subject', 'Date', 'To', 'Cc', 'Bcc', 'Hi', 'Hello', 'Thanks', 'Thank', 'Please', 'No', 'Yes', 'It', 'We', 'Us', 'He', 'She', 'They', 'His', 'Her', 'Their', 'Our', 'My', 'Me', 'I', 'In', 'On', 'At', 'By', 'Of', 'As', 'Is', 'Are', 'Be', 'Was', 'Were', 'Do', 'Did', 'Has', 'Have', 'Had', 'Will', 'Shall', 'Can', 'Could', 'Would', 'Should', 'May', 'Might', 'Must', 'If', 'Else', 'Then', 'So', 'Or', 'An', 'A',
+      // Add more common English nouns/adjectives/adverbs to further reduce false positives
+      'Access', 'System', 'Risk', 'Management', 'Finance', 'Operations', 'Compliance', 'Legal', 'Audit', 'Procurement', 'Sales', 'Marketing', 'Human', 'Resources', 'IT', 'Technology', 'Security', 'Planning', 'Strategy', 'Quality', 'Control', 'Assurance', 'User', 'Role', 'Permission', 'Credentials', 'Login', 'Logout', 'Profile', 'Data', 'Record', 'Primary', 'Secondary', 'Info', 'Information', 'Details', 'Account', 'Accounts', 'Customer', 'Service', 'Support', 'Manager', 'Admin', 'Administrator', 'Department', 'Team', 'Division', 'Organization', 'Company', 'Office', 'Branch', 'Unit', 'Section', 'Committee', 'Board', 'Group'
+    ]
+    // Add a list of common first and last names for more accurate detection
+    const commonFirstNames = [
+      'James','Mary','John','Patricia','Robert','Jennifer','Michael','Linda','William','Elizabeth','David','Barbara','Richard','Susan','Joseph','Jessica','Thomas','Sarah','Charles','Karen','Christopher','Nancy','Daniel','Lisa','Matthew','Betty','Anthony','Margaret','Mark','Sandra','Donald','Ashley','Steven','Kimberly','Paul','Emily','Andrew','Donna','Joshua','Michelle','Kenneth','Dorothy','Kevin','Carol','Brian','Amanda','George','Melissa','Edward','Deborah','Ronald','Stephanie','Timothy','Rebecca','Jason','Sharon','Jeffrey','Laura','Ryan','Cynthia','Jacob','Kathleen','Gary','Amy','Nicholas','Shirley','Eric','Angela','Stephen','Helen','Jonathan','Anna','Larry','Brenda','Justin','Pamela','Scott','Nicole','Brandon','Emma','Benjamin','Samantha','Samuel','Katherine','Gregory','Christine','Frank','Debra','Alexander','Rachel','Raymond','Catherine','Patrick','Carolyn','Jack','Janet','Dennis','Ruth','Jerry','Maria'
+    ]
+    const commonLastNames = [
+      'Smith','Johnson','Williams','Brown','Jones','Garcia','Miller','Davis','Rodriguez','Martinez','Hernandez','Lopez','Gonzalez','Wilson','Anderson','Thomas','Taylor','Moore','Jackson','Martin','Lee','Perez','Thompson','White','Harris','Sanchez','Clark','Ramirez','Lewis','Robinson','Walker','Young','Allen','King','Wright','Scott','Torres','Nguyen','Hill','Flores','Green','Adams','Nelson','Baker','Hall','Rivera','Campbell','Mitchell','Carter','Roberts'
     ]
     // Add a stoplist for department/team/organization words
     const orgStopwords = [
@@ -139,10 +148,14 @@ function App() {
     }
     // Phone
     if (options.phone) {
-      redacted = redacted.replace(/(\+\d{1,3}[-.\s]?)?(\(?\d{3}\)?[-.\s]?)?\d{3}[-.\s]?\d{4,6}/g, (match) => {
-        items.push({ type: 'Phone', value: match, reason: 'Matched regex for phone' })
-        return labelStyle === 'numbered' ? `[PHONE_${phoneCount++}]` : '[REDACTED PHONE]'
-      })
+      // Exclude Tax ID and Social Security from phone redaction using negative lookbehind and negative lookahead
+      redacted = redacted.replace(
+        /(?<!Tax ID:\s)(?<!TaxID:\s)(?<!Tax Identification Number:\s)(?<!TIN:\s)(?<!Social Security:\s)(?<!SSN:\s)(?<!Social Security Number:\s)(?<!\d{2}-)(\+\d{1,3}[-.\s]?)?(\(?\d{3}\)?[-.\s]?)?\d{3}[-.\s]?\d{4,6}(?![-\d])/g,
+        (match) => {
+          items.push({ type: 'Phone', value: match, reason: 'Matched regex for phone' })
+          return labelStyle === 'numbered' ? `[PHONE_${phoneCount++}]` : '[REDACTED PHONE]'
+        }
+      )
     }
     // Name (improved to catch single, double, and triple capitalized names)
     if (options.name) {
@@ -165,39 +178,54 @@ function App() {
         items.push({ type: 'Name', value: p2, reason: 'Matched name after Department:' })
         return p1 + (labelStyle === 'numbered' ? `[NAME_${nameCount++}]` : '[REDACTED NAME]')
       })
-      // Improved: Redact three-word names, including hyphenated and apostrophe names, skip if any word is in orgStopwords or stopwords
+      // Improved: Redact three-word names, only if first and last are common names, skip if any word is in orgStopwords or stopwords
       redacted = redacted.replace(
         /\b([A-Z][a-zA-Z'’-]{2,})\s+([A-Z][a-zA-Z'’-]{2,})\s+([A-Z][a-zA-Z'’-]{2,})\b/g,
         (match, w1, w2, w3) => {
           if ([w1, w2, w3].some(w => orgStopwords.includes(w) || stopwords.includes(w))) return match;
-          items.push({ type: 'Name', value: match, reason: 'Matched regex for three-word name (hyphen/apostrophe supported)' })
-          return labelStyle === 'numbered' ? `[NAME_${nameCount++}]` : '[REDACTED NAME]'
+          // Only redact if first or last is a common name
+          if (
+            (commonFirstNames.includes(w1) && commonLastNames.includes(w3)) ||
+            (commonFirstNames.includes(w1) && commonFirstNames.includes(w2)) ||
+            (commonLastNames.includes(w2) && commonLastNames.includes(w3))
+          ) {
+            items.push({ type: 'Name', value: match, reason: 'Matched likely three-word name' })
+            return labelStyle === 'numbered' ? `[NAME_${nameCount++}]` : '[REDACTED NAME]'
+          }
+          return match;
         }
       )
-      // Improved: Redact two-word names, including hyphenated and apostrophe names, skip if any word is in orgStopwords or stopwords
+      // Improved: Redact two-word names, only if first or last is a common name, skip if any word is in orgStopwords or stopwords
       redacted = redacted.replace(
         /\b([A-Z][a-zA-Z'’-]{2,})\s+([A-Z][a-zA-Z'’-]{2,})\b/g,
         (match, w1, w2) => {
           if ([w1, w2].some(w => orgStopwords.includes(w) || stopwords.includes(w))) return match;
-          items.push({ type: 'Name', value: match, reason: 'Matched regex for two-word name (hyphen/apostrophe supported)' })
-          return labelStyle === 'numbered' ? `[NAME_${nameCount++}]` : '[REDACTED NAME]'
+          // Only redact if either word is a common first or last name
+          if (commonFirstNames.includes(w1) || commonLastNames.includes(w2)) {
+            items.push({ type: 'Name', value: match, reason: 'Matched likely two-word name' })
+            return labelStyle === 'numbered' ? `[NAME_${nameCount++}]` : '[REDACTED NAME]'
+          }
+          return match;
         }
       )
-      // Optional: Redact single-word names if in whitelist
-      redacted = redacted.replace(/\b([A-Z][a-z]{2,})\b/g, (match) => {
-        if (nameWhitelist.includes(match)) {
-          items.push({ type: 'Name', value: match, reason: 'Matched whitelist single-word name' })
+      // Optional: Redact single-word names if in whitelist or common names
+      redacted = redacted.replace(/\b([A-Z][a-zA-Z'’-]{2,})\b/g, (match) => {
+        if (nameWhitelist.includes(match) || commonFirstNames.includes(match) || commonLastNames.includes(match)) {
+          items.push({ type: 'Name', value: match, reason: 'Matched whitelist/common single-word name' })
           return labelStyle === 'numbered' ? `[NAME_${nameCount++}]` : '[REDACTED NAME]'
         }
         return match;
       })
     }
-    // Address (very basic, numbers followed by street, not perfect)
+    // Address (stricter: numbers followed by street-type word only)
     if (options.address) {
-      redacted = redacted.replace(/\b\d{1,5}\s+([A-Za-z0-9.,\s]+(Street|St|Avenue|Ave|Road|Rd|Lane|Ln|Blvd|Boulevard|Drive|Dr|Court|Ct)\b)/gi, (match) => {
-        items.push({ type: 'Address', value: match, reason: 'Matched regex for address' })
-        return labelStyle === 'numbered' ? `[ADDRESS_${addressCount++}]` : '[REDACTED ADDRESS]'
-      })
+      redacted = redacted.replace(
+        /\b\d{1,5}\s+([A-Za-z0-9.,\s]+?\b(?:Street|St|Avenue|Ave|Road|Rd|Lane|Ln|Blvd|Boulevard|Drive|Dr|Court|Ct)\b)/gi,
+        (match) => {
+          items.push({ type: 'Address', value: match, reason: 'Matched regex for address' })
+          return labelStyle === 'numbered' ? `[ADDRESS_${addressCount++}]` : '[REDACTED ADDRESS]'
+        }
+      )
     }
     setRedactedItems(items)
     return redacted
